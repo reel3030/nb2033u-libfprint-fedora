@@ -21,6 +21,23 @@ if [ "$OS" = "ubuntu" ]; then
     libglib2.0-dev libgusb-dev libnss3-dev libgudev-1.0-dev \
     libpixman-1-dev libgirepository1.0-dev fprintd \
     cmake libssl-dev systemd-dev git
+
+    # Obtain the source code of libfprint.so with NB-2033-U patch.
+    git clone -b nb2033-support https://gitlab.freedesktop.org/Kernel-Error/libfprint.git
+    cd libfprint || exit 1
+
+    # Configure the build the libfprint.so
+    meson setup builddir --prefix=/usr/local -Ddoc=false -Dgtk-examples=false
+
+    # Build fprintd
+    ninja -C builddir
+
+    # Install the build artifact.
+    sudo ninja -C builddir install
+
+    # Update the library link
+    sudo ldconfig
+
 elif [ "$OS" = "fedora" ]; then
     echo "Fedora detected."
     # Build is done inside container.
@@ -38,33 +55,6 @@ else
     exit 1
 fi
 
-# Obtain the source code of libfprint.so with NB-2033-U patch.
-git clone -b nb2033-support https://gitlab.freedesktop.org/Kernel-Error/libfprint.git
-cd libfprint || exit 1
-
-# Configure the build the libfprint.so
-meson setup builddir --prefix=/usr/local -Ddoc=false -Dgtk-examples=false
-
-# Build fprintd
-if [ "$OS" = "ubuntu" ]; then
-    ninja -C builddir
-elif [ "$OS" = "fedora" ]; then
-    toolbox run -c ${CONTAINER} -- ninja -C builddir 
-    # We don't need container anymore.
-    toolbox rm -f -c ${CONTAINER}
-fi
-
-# Install the build artifact.
-sudo ninja -C builddir install
-
-# Fedora only. Move the library to the appropriate Fedora directory.
-# Where nb2033u is the name of sensor.
-if [ "$OS" = "fedora" ]; then
-    sudo cp /usr/local/lib64/libfprint-2.so.2.0.0 /usr/lib64/libfprint-2.so.2.0.0.nb2033u
-fi
-
-# Update the library link
-sudo ldconfig
 
 # Back to the original directory.
 cd - || exit 1
