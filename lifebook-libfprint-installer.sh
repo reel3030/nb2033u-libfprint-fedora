@@ -67,20 +67,15 @@ elif [ "$OS" = "fedora" ]; then
         { echo "Error: Failed to move to '$BASEDIR/rpmbuild/SOURCES/'" >&2; exit 1; }
     # Expand source code
     tar -xf libfprint-*.tar.gz
-    cd libfprint-*/ || exit 1
 
-    # Modify source code here
-
-    # RPM spec files
-    # 1. リリース番号に独自ビルド識別子（.custom 等）を追加
-    # Release:        1.custom%{?dist}
-
-    # 2. Patch定義を追加（他のPatch項目の後などに追加）
-    # Patch999:       my-custom-fix.patch
-
-    # Build
     cd "$BASEDIR"/rpmbuild/SPECS/ || \
         { echo "Error: Failed to move to '$BASEDIR/rpmbuild/SPECS/'" >&2; exit 1; }
+
+    # Modify release number. This will override the original version.
+    sed -i -e "s/^Release.*$/Release:        1.99.nb2033u%{?dist}/" libfprint.spec || \
+        { echo "Error: Failed to modify the spec file." >&2; exit 1; }
+
+    # Build
     toolbox run -c ${CONTAINER} -- rpmbuild --define "_topdir $BASEDIR/rpmbuild" -bb libfprint.spec || \
         { echo "Error: toolbox run 'rpmbuild -bb libfprint.spec' failed." >&2; exit 1; }
 
