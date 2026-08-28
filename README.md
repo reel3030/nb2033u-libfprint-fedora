@@ -36,17 +36,17 @@ Hardware:
 - Fujitsu FMV Lifebook U9311
 
 ## Install
-Download the `libfprint-*-1.99.nb2033u.fc44.x86_64.rpm` file from the Releases page. Then, run the following command:
+Download the `libfprint-1.94.100-1.99.nb2033u.fc44.x86_64.rpm` file from the Releases page. Then, run the following command:
 
 ```sh
 if [ -f /run/ostree-booted ]; then
     echo "Environment: Fedora Atomic Desktop (rpm-ostree)"
     # Override libfprint with the local package.
-    sudo rpm-ostree override replace ./libfprint-*-1.99.nb2033u.fc44.x86_64.rpm
+    sudo rpm-ostree override replace ./libfprint-1.94.100-1.99.nb2033u.fc44.x86_64.rpm
 else
     echo "Environment: Standard Fedora (Package-based / Workstation)"
     # Replace libfprint with the local package.
-    sudo dnf swap ./libfprint-*-1.99.nb2033u.fc44.x86_64.rpm
+    sudo dnf upgrade ./libfprint-1.94.100-1.99.nb2033u.fc44.x86_64.rpm
 fi
 ```
 
@@ -68,7 +68,7 @@ fi
 ## Notice on the version number and the release number of the RPM package
 The version number andd the release number of the RPM package are set to:
 - Version: 1.94.100
-- Release: 1.99.nb2033u.
+- Release: 1.99.nb2033u
 
 This configuration will override the official libfprint package (Version 94.100, Release 1).
 
