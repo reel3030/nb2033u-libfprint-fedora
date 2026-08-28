@@ -66,7 +66,14 @@ elif [ "$OS" = "fedora" ]; then
     cd "$BASEDIR"/rpmbuild/SOURCES/ || \
         { echo "Error: Failed to move to '$BASEDIR/rpmbuild/SOURCES/'" >&2; exit 1; }
     # Expand source code
-    tar -xf libfprint-*.tar.gz
+    #tar -xf libfprint-*.tar.gz
+
+    # Clone the development repo of Sebastian van de Meer
+    git clone https://gitlab.freedesktop.org/Kernel-Error/libfprint.git
+    cd libfprint
+
+    # Checkout the newest commit at the point of 2026-7-31.
+    git checkout 344480a6d62a58f036680a81f5cf4f1e890afabb
 
     cd "$BASEDIR"/rpmbuild/SPECS/ || \
         { echo "Error: Failed to move to '$BASEDIR/rpmbuild/SPECS/'" >&2; exit 1; }
@@ -78,6 +85,8 @@ elif [ "$OS" = "fedora" ]; then
     # Build
     toolbox run -c ${CONTAINER} -- rpmbuild --define "_topdir $BASEDIR/rpmbuild" -bb libfprint.spec || \
         { echo "Error: toolbox run 'rpmbuild -bb libfprint.spec' failed." >&2; exit 1; }
+
+
 
 else
     echo "Unsupported operating system: $OS"
