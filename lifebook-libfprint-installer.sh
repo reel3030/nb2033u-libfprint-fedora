@@ -69,8 +69,9 @@ elif [ "$OS" = "fedora" ]; then
     #tar -xf libfprint-*.tar.gz
 
     # Clone the development repo of Sebastian van de Meer
-    git clone https://gitlab.freedesktop.org/Kernel-Error/libfprint.git
-    cd libfprint
+    git clone https://gitlab.freedesktop.org/Kernel-Error/libfprint.git || \
+        { echo "Error: Failed to clone S.V.D.Meer repo." >&2; exit 1; }
+    cd libfprint || exit 1
 
     # Checkout the newest commit at the point of 2026-7-31.
     git checkout 344480a6d62a58f036680a81f5cf4f1e890afabb
@@ -86,6 +87,24 @@ elif [ "$OS" = "fedora" ]; then
     toolbox run -c ${CONTAINER} -- rpmbuild --define "_topdir $BASEDIR/rpmbuild" -bb libfprint.spec || \
         { echo "Error: toolbox run 'rpmbuild -bb libfprint.spec' failed." >&2; exit 1; }
 
+    # install to system
+    cd "$BASEDIR"/rpmbuild/RPMS/x86_64 || \
+        { echo "Error: Failed to move to 'rpmbuild/RPMS/x86_64'" >&2; exit 1; }
+    if [ -f /run/ostree-booted ]; then
+        echo "Environment: Fedora Atomic Desktop (rpm-ostree)"
+        # Override the system libfprint with the local one. 
+        sudo rpm-ostree override replace ./libfprint-1.94.100-1.99.nb2033u.fc44.x86_64.rpm || \
+            { echo "Error: Failed rpm-ostree override replace ./libfprint-1.94.100-1.99.nb2033u.fc44.x86_64.rpm." >&2; exit 1; }
+
+        echo "!!! Reboot the system to apply change.!!!"
+    else
+        echo "Environment: Standard Fedora (Package-based / Workstation)"
+        # To be sure, remove the old 
+        sudo rm /usr/lib64/libfprint-2.so.2.0.0.nb2033u
+        # Install
+        sudo dnf swap ./libfprint-1.94.100-1.99.nb2033u.fc44.x86_64.rpm || \
+            { echo "Error: Failed dnf swap ./libfprint-1.94.100-1.99.nb2033u.fc44.x86_64.rpm." >&2; exit 1; }
+    fi
 
 
 else
