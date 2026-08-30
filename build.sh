@@ -43,15 +43,10 @@ toolbox run -c ${CONTAINER} -- rpm -i --define "_topdir $BASEDIR/rpmbuild" libfp
 cd "$BASEDIR"/rpmbuild/SOURCES/ || \
     { echo "Error: Failed to move to '$BASEDIR/rpmbuild/SOURCES/'" >&2; exit 1; }
 
-if  true ; then
-    # Expand source code
-    echo "Using the source code from the original source RPM."
-    tar -xf libfprint-*.tar.gz || \
-        { echo "Error: Failed to extract libfprint-*.tar.gz." >&2; exit 1; }
 
-    cd "$BASEDIR"/rpmbuild/SPECS/ || \
-        { echo "Error: Failed to move to '$BASEDIR/rpmbuild/SPECS/'" >&2; exit 1; }
-else
+# Customize part. 
+# Change it to false if you want to use the original source code from Fedora.
+if  true ; then
     # If you want to use the source code from the development repo of Sebastian van de Meer, comment out the above line and uncomment the following line.
     echo "Using the source code from the development repo of Sebastian van de Meer."
 
@@ -64,7 +59,6 @@ else
         { echo "Error: Failed to modify the Release field of spec file." >&2; exit 1; }
     sed -i '/^Source0:/a Patch0:         nb2033u.patch' "$BASEDIR"/rpmbuild/SPECS/libfprint.spec || \
         { echo "Error: Failed to modify the Patch field ofspec file." >&2; exit 1; }
-
 fi
 
 # Build
