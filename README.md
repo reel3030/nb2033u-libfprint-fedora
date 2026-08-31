@@ -1,31 +1,31 @@
 # nb2033u-libfprint-fedora
 Tentative libfprint RPM package builder for Fedora Workstation and Fedora Atomic Desktop.
 
-**C A U T I O N**: The script in this project installs software that is not officially managed by the fprintd project. Run the script at your own risk.
+**C A U T I O N**: This project builds packages that are not officially managed by the fprintd project. Use them at your own risk. The author is not responsible for any damage caused by these packages.
 
 ## Details
-A patch for fprintd to support the fingerprint reader of the NB-2033-U was developed by Mr. Sebastian van de Meer.
+A patch to add support for the NB-2033-U fingerprint reader to fprintd was developed by Mr. Sebastian van de Meer.
 
-[This patch has been sent to the fprintd project](https://gitlab.freedesktop.org/libfprint/libfprint/-/merge_requests/574), but the fprintd project releases updates only once or twice a year.
+[This patch has been submitted to the fprintd project](https://gitlab.freedesktop.org/libfprint/libfprint/-/merge_requests/574), but upstream updates are released only once or twice a year.
 
-For people who want to use the fingerprint reader on a machine equipped with the NB-2033-U before official support is added to Fedora, I wrote this script to build an RPM package.
+If you want to use the NB-2033-U fingerprint reader before official support is added to Fedora, this project builds the required RPM package.
 
-Note that the major part of this script was written and published by Mr. Sebastian van de Meer on [his blog](https://www.kernel-error.de/2026/03/17/next-biometrics-nb-2033-u-reverse-engineering-fingerabdruckleser-linux/).
+This script applies the patch to the libfprint source tree from the official Fedora repository and builds an RPM package.
 
 ## Supported OS and hardware
-The following distributions and their variants are supported:
+The following distributions and variants are supported:
 
 - Fedora Workstation and its variants
 - Fedora Atomic Desktop
 
-The PC with the NB-2033-U fingerprint reader is supported (Vendor ID: 298d, Product ID: 2033).
+The NB-2033-U fingerprint reader is supported on compatible systems (Vendor ID: 298d, Product ID: 2033).
 
 To check whether your system has the NB-2033-U, run the following command:
 
 ```sh
 lsusb | grep "298d:2033"
 ```
-If the NB-2033-U is used, it will appear in the output.
+If the device is present, it will appear in the output.
 
 ## Tested environment
 Distributions:
@@ -36,7 +36,7 @@ Hardware:
 - Fujitsu FMV Lifebook U9311
 
 ## Install
-Download the `libfprint-1.94.100-1.99.nb2033u.fc44.x86_64.rpm` file from the Release archive page. Then, run the following command:
+Download the `libfprint-1.94.100-1.99.nb2033u.fc44.x86_64.rpm` package from the Release archive page, then run the following command:
 
 ```sh
 if [ -f /run/ostree-booted ]; then
@@ -49,10 +49,10 @@ else
     sudo dnf upgrade ./libfprint-1.94.100-1.99.nb2033u.fc44.x86_64.rpm
 fi
 ```
-This code snipets works for both Fedora Workstation and Fedora Atomic Desktop.
+This command works for both Fedora Workstation and Fedora Atomic Desktop.
 
 ## Uninstall
-To uninstall the artifacts of this project and use the official libfprint, run the following command:
+To uninstall the artifacts of this project and restore the official libfprint package, run the following command:
 
 ```sh
 if [ -f /run/ostree-booted ]; then
@@ -66,22 +66,21 @@ else
     sudo dnf distro-sync libfprint
 fi
 ```
-This code snipets works for both Fedora Workstation and Fedora Atomic Desktop.
+This command works for both Fedora Workstation and Fedora Atomic Desktop.
 
-
-## Notice on the version number and the release number of the RPM package
-The version number andd the release number of the RPM package are set to:
+## Notice on the version and release numbers of the RPM package
+The version and release numbers of the RPM package are set to:
 - Version: 1.94.100
 - Release: 1.99.nb2033u
 
-This configuration will override the official libfprint package (Version 94.100, Release 1).
+This configuration overrides the official libfprint package (Version 94.100, Release 1).
 
-And if the newer version of the official libfprint package is released, the RPM package of this project will be automatcially replaced with the official one.
+If a newer version of the official libfprint package is released, this project package will be automatically replaced with the official package.
 
-This is intended. We are expecting the the next official release of libfprint to support the NB-2033-U.
+This is intentional. We expect the next official release of libfprint to support the NB-2033-U.
 
-## Self build
-To build the RPM by yourself, run the following script:
+## Build the RPM
+To build the RPM yourself, run the following script:
 
 ```sh
 ./build.sh
@@ -98,10 +97,9 @@ fprintd-enroll
 fprintd-verify
 ```
 
-After invoking the command, a text message asks you to put your finger on the reader.
-Place the specified finger on the reader 5 times.
+After the command starts, a prompt asks you to place your finger on the reader. Place the specified finger on the reader five times.
 
-Then, another test message asks you to place the same finger again, and the system verifies it.
+Then, another prompt asks you to place the same finger again, and the system verifies it.
 
 ## Uninstall
 To uninstall, run the following commands:
@@ -111,6 +109,6 @@ To uninstall, run the following commands:
 ```
 
 ## License
-The script and text in this project are published under the [MIT LICENSE](LICENSE).
+The scripts and text in this project are published under the [MIT LICENSE](LICENSE).
 
-The generated RPMs are delivered under the [fprintd](https://fprint.freedesktop.org/) license.
+The generated RPMs are distributed under the [fprintd](https://fprint.freedesktop.org/) license.

@@ -1,68 +1,61 @@
 # nb2033u.patch
 
-This documents explain the `nb2033u.patch` file.
+This document explains the `nb2033u.patch` file used in this project.
 
-Note that this patch is sticky to the libfprint version 1.94.100. If you want to use this patch on other versions, please check the source code and modify the patch file accordingly.
+The patch is specific to libfprint version 1.94.100. If you want to reuse it for another version, check the source tree and adjust the patch accordingly.
 
-# Purpose of nb2033u.patch
+## Purpose
 
-This patch file is applied to the the source code of the libfprint.rpm. With this patch applied, the source code have support the NB-2033-U fingerprint reader.
+This patch is applied to the libfprint source tree before building the RPM. It adds support for the NB-2033-U fingerprint reader.
 
-This patch method is official workflow of the RPM building. To make it happen, the `build.sh` script will do: 
- 
- 1. copy nb2033u.patch to the `rpmbuild/SOURCES` directory.
- 2. Add the line `Patch0: nb2033u.patch` to the `libfprint.spec` file.
+The build flow follows the standard RPM packaging approach:
 
-# How nb2033u.patch was generated
+1. Copy `nb2033u.patch` into the `rpmbuild/SOURCES` directory.
+2. Add `Patch0: nb2033u.patch` to `libfprint.spec`.
 
-Following is the script to generate the `nb2033u.patch` file. You can run this script in the repository root.
+## How the patch was generated
 
-Before running this script, please run `./build.sh` to prepare the `rpmbuild/SOURCES` directory.
+The script below generates `nb2033u.patch` from the repository root.
 
-In this script, we clone the development repo of Sebastian van de Meer, and checkout the newest
-commit at the point of 2026-7-31. This commit is the support for the libfprint version 1.94.100.
+Before running it, execute `./build.sh` to prepare the `rpmbuild/SOURCES` directory.
 
-And then, we find `'nb2033': {},` from `tests/meson.build`, and remove that line. 
-This is needed to avoid the build error.
+The procedure is as follows:
 
-After this small modification, we run diff command to generate the patch file.
-The generated patch file will be saved as `nb2033u.patch` in the `rpmbuild/SOURCES` directory.
-
+- Clone the development repository of Sebastian van de Meer.
+- Check out the newest commit as of 2026-07-31, which adds support for libfprint 1.94.100.
+- Remove `'nb2033': {},` from `tests/meson.build` to avoid a build error.
+- Generate the patch with `diff` and save it as `nb2033u.patch` in `rpmbuild/SOURCES`.
 
 ```sh
-# At first, define a function to generate the patch file.
+# Define a function to generate the patch.
 build_nb2033_patch() {
-    # Go to the work directory.
     cd rpmbuild/SOURCES || return 1
 
-    # unzip the official source tree. 
+    # Extract the official source tree.
     tar -xzf libfprint-*.tar.gz || \
         { echo "Error: Failed to extract libfprint-*.tar.gz." >&2; return 1; }
 
-    # Clone the development repo of Sebastian van de Meer
+    # Clone the development repository of Sebastian van de Meer.
     git clone https://gitlab.freedesktop.org/Kernel-Error/libfprint.git || \
-        { echo "Error: Failed to clone S.V.D.Meer repo." >&2; return 1; }
+        { echo "Error: Failed to clone the S.V.D.Meer repository." >&2; return 1; }
     cd libfprint || return 1
 
-    # Checkout the newest commit at the point of 2026-7-31.
-    # This the support for the libfprint version 1.94.100.
+    # Check out the newest commit as of 2026-07-31.
+    # This adds support for libfprint version 1.94.100.
     git checkout 344480a6d62a58f036680a81f5cf4f1e890afabb || \
-        { echo "Error: Failed to checkout nb2033-support branch." >&2; return 1; }
+        { echo "Error: Failed to checkout the nb2033-support commit." >&2; return 1; }
 
-    # Find `'nb2033': {},` from tests/meson.build, then, remove that line. 
-    # This is needed to avoid the build error. 
+    # Remove the NB-2033-U entry from tests/meson.build.
+    # This avoids a build error.
     sed -i "/'nb2033': {},/d" tests/meson.build || \
-        { echo "Error: Failed to remove the line of nb2033 from tests/meson.build." >&2; return 1; }
-
+        { echo "Error: Failed to remove the nb2033 entry from tests/meson.build." >&2; return 1; }
 
     cd .. || return 1
 
-    # Make patch
+    # Create the patch.
     diff -uNr -x "build" -x "*.o" -x ".git" -uNr libfprint-v1.94.100 libfprint > nb2033u.patch
-    
 }
 
-# Here we go.
+# Run it.
 build_nb2033_patch
-
 ```
