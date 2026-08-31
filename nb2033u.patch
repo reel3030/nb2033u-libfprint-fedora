@@ -1,6 +1,6 @@
 diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/data/autosuspend.hwdb libfprint/data/autosuspend.hwdb
 --- libfprint-v1.94.100/data/autosuspend.hwdb	2026-07-26 07:36:25.000000000 +0900
-+++ libfprint/data/autosuspend.hwdb	2026-08-31 14:31:13.826475357 +0900
++++ libfprint/data/autosuspend.hwdb	2026-08-31 15:03:23.192277777 +0900
 @@ -176,6 +176,7 @@
  usb:v04F3p0CA8*
  usb:v04F3p0CB0*
@@ -31,7 +31,7 @@ diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/data/autosuspend.hw
  usb:v3274pB012*
 diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/libfprint/drivers/elanmoc/elanmoc.c libfprint/libfprint/drivers/elanmoc/elanmoc.c
 --- libfprint-v1.94.100/libfprint/drivers/elanmoc/elanmoc.c	2026-07-26 07:36:25.000000000 +0900
-+++ libfprint/libfprint/drivers/elanmoc/elanmoc.c	2026-08-31 14:31:13.833999062 +0900
++++ libfprint/libfprint/drivers/elanmoc/elanmoc.c	2026-08-31 15:03:23.197277689 +0900
 @@ -41,6 +41,7 @@
    { .vid = 0x04f3,  .pid = 0x0ca8,  },
    { .vid = 0x04f3,  .pid = 0x0cb0,  },
@@ -42,7 +42,7 @@ diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/libfprint/drivers/e
  
 diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/libfprint/drivers/nb2033.c libfprint/libfprint/drivers/nb2033.c
 --- libfprint-v1.94.100/libfprint/drivers/nb2033.c	1970-01-01 09:00:00.000000000 +0900
-+++ libfprint/libfprint/drivers/nb2033.c	2026-08-31 14:31:13.839355946 +0900
++++ libfprint/libfprint/drivers/nb2033.c	2026-08-31 15:03:23.200277636 +0900
 @@ -0,0 +1,566 @@
 +/*
 + * Next Biometrics NB-2033-U driver for libfprint
@@ -612,7 +612,7 @@ diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/libfprint/drivers/n
 +}
 diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/libfprint/fprint-list-udev-hwdb.c libfprint/libfprint/fprint-list-udev-hwdb.c
 --- libfprint-v1.94.100/libfprint/fprint-list-udev-hwdb.c	2026-07-26 07:36:25.000000000 +0900
-+++ libfprint/libfprint/fprint-list-udev-hwdb.c	2026-08-31 14:31:13.849200147 +0900
++++ libfprint/libfprint/fprint-list-udev-hwdb.c	2026-08-31 15:03:23.209277478 +0900
 @@ -195,7 +195,6 @@
    { .vid = 0x2808, .pid = 0xa573 },
    { .vid = 0x2808, .pid = 0xa658 },
@@ -623,7 +623,7 @@ diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/libfprint/fprint-li
    { .vid = 0x3274, .pid = 0xb012 },
 diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/libfprint/meson.build libfprint/libfprint/meson.build
 --- libfprint-v1.94.100/libfprint/meson.build	2026-07-26 07:36:25.000000000 +0900
-+++ libfprint/libfprint/meson.build	2026-08-31 14:31:13.850163516 +0900
++++ libfprint/libfprint/meson.build	2026-08-31 15:03:23.209277478 +0900
 @@ -123,6 +123,7 @@
      'elanmoc' : files('drivers/elanmoc/elanmoc.c'),
      'elanspi' : files('drivers/elanspi.c'),
@@ -634,7 +634,7 @@ diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/libfprint/meson.bui
      'virtual_device_storage' : files('drivers/virtual-device-storage.c'),
 diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/meson.build libfprint/meson.build
 --- libfprint-v1.94.100/meson.build	2026-07-26 07:36:25.000000000 +0900
-+++ libfprint/meson.build	2026-08-31 14:31:13.850781911 +0900
++++ libfprint/meson.build	2026-08-31 15:03:23.209277478 +0900
 @@ -142,6 +142,7 @@
      'upekts': {},
      'goodixmoc': {},
@@ -643,22 +643,11 @@ diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/meson.build libfpri
      'fpcmoc': {},
      'realtek': {},
      'focaltech_moc': {},
-diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/tests/meson.build libfprint/tests/meson.build
---- libfprint-v1.94.100/tests/meson.build	2026-07-26 07:36:25.000000000 +0900
-+++ libfprint/tests/meson.build	2026-08-31 14:31:13.862163286 +0900
-@@ -50,6 +50,7 @@
-     'vfs7552': {},
-     'goodixmoc': {},
-     'nb1010': {},
-+    'nb2033': {},
-     'egis0570': {},
-     'egismoc': {},
-     'egis_etu905': {},
 バイナリーファイル libfprint-v1.94.100/tests/nb2033/capture.pcapng とlibfprint/tests/nb2033/capture.pcapng は異なります
 バイナリーファイル libfprint-v1.94.100/tests/nb2033/capture.png とlibfprint/tests/nb2033/capture.png は異なります
 diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/tests/nb2033/device libfprint/tests/nb2033/device
 --- libfprint-v1.94.100/tests/nb2033/device	1970-01-01 09:00:00.000000000 +0900
-+++ libfprint/tests/nb2033/device	2026-08-31 14:31:13.863769851 +0900
++++ libfprint/tests/nb2033/device	2026-08-31 15:03:23.219277302 +0900
 @@ -0,0 +1,378 @@
 +P: /devices/pci0000:00/0000:00:14.0/usb1/1-6/1-6.1
 +N: bus/usb/001/006=12010002000000408D29332001000102030109022000010104A0FA0904000002FFFFFF050705810240000007050202400000

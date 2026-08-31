@@ -35,6 +35,12 @@ build_nb2033_patch() {
     git checkout 344480a6d62a58f036680a81f5cf4f1e890afabb || \
         { echo "Error: Failed to checkout nb2033-support branch." >&2; return 1; }
 
+    # Find `'nb2033': {},` from tests/meson.build, then, remove that line. 
+    # This is needed to avoid the build error. 
+    sed -i "/'nb2033': {},/d" tests/meson.build || \
+        { echo "Error: Failed to remove the line of nb2033 from tests/meson.build." >&2; return 1; }
+
+
     cd .. || return 1
 
     # Make patch
