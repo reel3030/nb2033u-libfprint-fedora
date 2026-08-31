@@ -36,7 +36,7 @@ Hardware:
 - Fujitsu FMV Lifebook U9311
 
 ## Install
-Download the `libfprint-1.94.100-1.99.nb2033u.fc44.x86_64.rpm` file from the Releases page. Then, run the following command:
+Download the `libfprint-1.94.100-1.99.nb2033u.fc44.x86_64.rpm` file from the Release archive page. Then, run the following command:
 
 ```sh
 if [ -f /run/ostree-booted ]; then
@@ -49,6 +49,7 @@ else
     sudo dnf upgrade ./libfprint-1.94.100-1.99.nb2033u.fc44.x86_64.rpm
 fi
 ```
+This code snipets works for both Fedora Workstation and Fedora Atomic Desktop.
 
 ## Uninstall
 To uninstall the artifacts of this project and use the official libfprint, run the following command:
@@ -65,6 +66,9 @@ else
     sudo dnf distro-sync libfprint
 fi
 ```
+This code snipets works for both Fedora Workstation and Fedora Atomic Desktop.
+
+
 ## Notice on the version number and the release number of the RPM package
 The version number andd the release number of the RPM package are set to:
 - Version: 1.94.100

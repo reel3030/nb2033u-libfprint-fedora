@@ -15,6 +15,20 @@ This patch method is official workflow of the RPM building. To make it happen, t
 
 # How nb2033u.patch was generated
 
+Following is the script to generate the `nb2033u.patch` file. You can run this script in the repository root.
+
+Before running this script, please run `./build.sh` to prepare the `rpmbuild/SOURCES` directory.
+
+In this script, we clone the development repo of Sebastian van de Meer, and checkout the newest
+commit at the point of 2026-7-31. This commit is the support for the libfprint version 1.94.100.
+
+And then, we find `'nb2033': {},` from `tests/meson.build`, and remove that line. 
+This is needed to avoid the build error.
+
+After this small modification, we run diff command to generate the patch file.
+The generated patch file will be saved as `nb2033u.patch` in the `rpmbuild/SOURCES` directory.
+
+
 ```sh
 # At first, define a function to generate the patch file.
 build_nb2033_patch() {
