@@ -1,16 +1,14 @@
 # nb2033u-libfprint-fedora
-Tentative libfprint RPM package builder for Fedora Workstation and Fedora Atomic Desktop.
+Tentative libfprint RPM package for Fedora Workstation and Fedora Atomic Desktop.
 
-**C A U T I O N**: This project builds packages that are not officially managed by the fprintd project. Use them at your own risk. The author is not responsible for any damage caused by these packages.
+**C A U T I O N**: This project provides packages that are not officially managed by the fprintd project. Use them at your own risk. The author is not responsible for any damage caused by these packages.
 
 ## Details
 A patch to add support for the NB-2033-U fingerprint reader to fprintd was developed by Mr. Sebastian van de Meer.
 
 [This patch has been submitted to the fprintd project](https://gitlab.freedesktop.org/libfprint/libfprint/-/merge_requests/574), but upstream updates are released only once or twice a year.
 
-If you want to use the NB-2033-U fingerprint reader before official support is added to Fedora, this project builds the required RPM package.
-
-This script applies the patch to the libfprint source tree from the official Fedora repository and builds an RPM package.
+If you want to use the NB-2033-U fingerprint reader before official support is added to Fedora, this project provides the required RPM package.
 
 ## Supported OS and hardware
 The following distributions and variants are supported:
