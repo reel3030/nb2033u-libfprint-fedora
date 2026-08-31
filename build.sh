@@ -62,11 +62,14 @@ if  true ; then
 fi
 
 # Build
-toolbox run -c ${CONTAINER} -- rpmbuild --define "_topdir $BASEDIR/rpmbuild" -bb libfprint.spec || \
+toolbox run -c ${CONTAINER} -- rpmbuild --define "_topdir $BASEDIR/rpmbuild" -bb "$BASEDIR"/rpmbuild/SPECS/libfprint.spec || \
     { echo "Error: toolbox run 'rpmbuild -bb libfprint.spec' failed." >&2; exit 1; }
 
-toolbox rm ${CONTAINER} -f || \
-    { echo "Error: toolbox rm failed." >&2; exit 1; }
+# Removing the container is optional. change condition from `false` to `true` if you want to remove the container after the build.
+if false; then 
+    toolbox rm ${CONTAINER} -f || \
+        { echo "Error: toolbox rm failed." >&2; exit 1; }
+fi
 
 # Back to the original directory.
 cd "$BASEDIR" || exit 1

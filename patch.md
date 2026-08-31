@@ -38,7 +38,8 @@ build_nb2033_patch() {
     cd .. || return 1
 
     # Make patch
-    diff -uNr libfprint-v1.94.100 libfprint > nb2033u.patch
+    diff -uNr -x "build" -x "*.o" -x ".git" -uNr libfprint-v1.94.100 libfprint > nb2033u.patch
+    
 }
 
 # Here we go.
