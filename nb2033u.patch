@@ -1,0 +1,1029 @@
+diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/data/autosuspend.hwdb libfprint/data/autosuspend.hwdb
+--- libfprint-v1.94.100/data/autosuspend.hwdb	2026-07-26 07:36:25.000000000 +0900
++++ libfprint/data/autosuspend.hwdb	2026-08-31 15:03:23.192277777 +0900
+@@ -176,6 +176,7 @@
+ usb:v04F3p0CA8*
+ usb:v04F3p0CB0*
+ usb:v04F3p0CB2*
++usb:v04F3p0CB6*
+  ID_AUTOSUSPEND=1
+  ID_PERSIST=0
+ 
+@@ -267,6 +268,11 @@
+  ID_AUTOSUSPEND=1
+  ID_PERSIST=0
+ 
++# Supported by libfprint driver nb2033
++usb:v298Dp2033*
++ ID_AUTOSUSPEND=1
++ ID_PERSIST=0
++
+ # Supported by libfprint driver realtek
+ usb:v0BDAp5813*
+ usb:v0BDAp5816*
+@@ -546,7 +552,6 @@
+ usb:v2808pA573*
+ usb:v2808pA658*
+ usb:v2808pC652*
+-usb:v298Dp2033*
+ usb:v2DF0p0003*
+ usb:v3274p9008*
+ usb:v3274pB012*
+diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/libfprint/drivers/elanmoc/elanmoc.c libfprint/libfprint/drivers/elanmoc/elanmoc.c
+--- libfprint-v1.94.100/libfprint/drivers/elanmoc/elanmoc.c	2026-07-26 07:36:25.000000000 +0900
++++ libfprint/libfprint/drivers/elanmoc/elanmoc.c	2026-08-31 15:03:23.197277689 +0900
+@@ -41,6 +41,7 @@
+   { .vid = 0x04f3,  .pid = 0x0ca8,  },
+   { .vid = 0x04f3,  .pid = 0x0cb0,  },
+   { .vid = 0x04f3,  .pid = 0x0cb2,  },
++  { .vid = 0x04f3,  .pid = 0x0cb6,  },
+   { .vid = 0,  .pid = 0,  .driver_data = 0 },   /* terminating entry */
+ };
+ 
+diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/libfprint/drivers/nb2033.c libfprint/libfprint/drivers/nb2033.c
+--- libfprint-v1.94.100/libfprint/drivers/nb2033.c	1970-01-01 09:00:00.000000000 +0900
++++ libfprint/libfprint/drivers/nb2033.c	2026-08-31 15:03:23.200277636 +0900
+@@ -0,0 +1,566 @@
++/*
++ * Next Biometrics NB-2033-U driver for libfprint
++ *
++ * Copyright (C) 2026 Sebastian van de Meer <kernel-error@kernel-error.com>
++ *
++ * Based on nb1010.c by Huan Wang and Andrej Krutak.
++ * Protocol reverse-engineered from USB captures using the
++ * NBBiometrics ANF SDK on Linux with usbmon.
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++/*
++ * NB-2033-U Protocol Notes:
++ *
++ * Endpoints: Bulk OUT EP 0x02, Bulk IN EP 0x01 (address 0x81 with direction bit)
++ * Image: 256x180 pixels, 8-bit grayscale, same sensor as NB-1010-U/NB-2020-U
++ *
++ * Command format:  [CMD] [0x00] [LEN_LO] [LEN_HI] [PAYLOAD...]
++ * Response format: [STATUS_LO] [STATUS_HI] [LEN_LO] [LEN_HI] [PAYLOAD...]
++ *
++ * Two 0x0D config commands must precede each 0x38 finger detect command
++ * to enable enhanced detection mode (empirically determined from USB captures).
++ * Capture (0x12) returns 180 rows of 268 bytes (12 header + 256 pixels).
++ */
++
++#define FP_COMPONENT "nb2033"
++#include "fpi-log.h"
++
++#include "drivers_api.h"
++
++#define FRAME_HEIGHT 180
++#define FRAME_WIDTH 256
++
++#define NB2033_EP_OUT (0x02 | FPI_USB_ENDPOINT_OUT)
++#define NB2033_EP_IN (0x01 | FPI_USB_ENDPOINT_IN)
++
++#define NB2033_CMD_RECV_LEN 6
++#define NB2033_ROW_HDR_LEN 12
++#define NB2033_ROW_RECV_LEN (NB2033_ROW_HDR_LEN + FRAME_WIDTH)
++
++/* Finger detect: response byte[4], range 0-255.
++ * Threshold 40 determined empirically from USB captures:
++ * values 0-3 = no finger, transients after init peak ~21,
++ * real finger placement peaks 25-50+. */
++#define NB2033_FINGER_LEVEL_OFFSET 4
++#define NB2033_FINGER_THRESHOLD 40
++
++#define NB2033_INIT_RECV_LEN 8
++#define NB2033_DEFAULT_TIMEOUT 1000
++#define NB2033_CAPTURE_TIMEOUT 2000
++#define NB2033_TRANSITION_DELAY 50
++#define NB2033_SETTLE_DELAY 1500
++#define NB2033_ROW_READY_DELAY 150
++
++/* SSM states.
++ * nb2033_write_ignore_read() sends a command, then reads and discards the
++ * response; the response read completion advances the SSM by ONE state, to
++ * the matching M_*_DONE state. Each M_*_DONE handler then advances to the
++ * next functional state. */
++enum {
++  /* Init sensor at start of each cycle (SDK sends 0x07 twice) */
++  M_INIT1_SEND,
++  M_INIT1_READ,
++  M_INIT2_SEND,
++  M_INIT2_READ,
++  M_INIT_SETTLE,
++  /* Finger detection: 0x0D, 0x0D, 0x38 */
++  M_WAIT_PRINT,
++  M_CONFIG1,        /* send 0x0D + read response */
++  M_CONFIG1_DONE,   /* response read complete; advance */
++  M_CONFIG2,        /* send 0x0D + read response */
++  M_CONFIG2_DONE,   /* response read complete; advance */
++  M_DETECT_SEND,
++  M_DETECT_READ,
++  /* Capture */
++  M_PRECAPTURE,      /* send 0x0D precapture + read */
++  M_PRECAPTURE_DONE, /* auto-advanced */
++  M_CAPTURE,         /* send 0x12 capture + read */
++  M_CAPTURE_DONE,    /* auto-advanced */
++  M_CAPTURE_WAIT,
++  M_READ_DATA,
++  M_SUBMIT_PRINT,
++
++  M_LOOP_NUM_STATES,
++};
++
++/* Commands */
++static guint8 nb2033_cmd_init[] = {
++  0x07, 0x00, 0x06, 0x00, 0x01, 0x00, 0x4e, 0x00, 0x00, 0x00,
++};
++
++static guint8 nb2033_cmd_config[] = {
++  0x0d, 0x00, 0x02, 0x00, 0x00, 0x00,
++};
++
++static guint8 nb2033_cmd_check_finger[] = {
++  0x38, 0x00, 0x02, 0x00, 0x00, 0x00,
++};
++
++static guint8 nb2033_cmd_capture[] = {
++  0x12, 0x00, 0x10, 0x00,
++  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++
++struct _FpiDeviceNb2033
++{
++  FpImageDevice parent;
++  FpiSsm       *ssm;
++  guint8       *scanline_buf;
++  gboolean      deactivating;
++  guint         partial_received;
++};
++
++G_DECLARE_FINAL_TYPE (FpiDeviceNb2033, fpi_device_nb2033, FPI, DEVICE_NB2033, FpImageDevice);
++G_DEFINE_TYPE (FpiDeviceNb2033, fpi_device_nb2033, FP_TYPE_IMAGE_DEVICE);
++
++static void
++nb2033_dev_init (FpImageDevice *dev)
++{
++  FpiDeviceNb2033 *self = FPI_DEVICE_NB2033 (dev);
++  GError *error = NULL;
++
++  if (!g_usb_device_claim_interface (fpi_device_get_usb_device (FP_DEVICE (dev)), 0, 0, &error))
++    {
++      fpi_image_device_open_complete (dev, error);
++      return;
++    }
++
++  self->scanline_buf = g_malloc0 (FRAME_WIDTH * FRAME_HEIGHT);
++
++  fpi_image_device_open_complete (dev, NULL);
++  fp_dbg ("nb2033 initialized");
++}
++
++static void
++nb2033_dev_deinit (FpImageDevice *dev)
++{
++  FpiDeviceNb2033 *self = FPI_DEVICE_NB2033 (dev);
++  GError *error = NULL;
++
++  g_clear_pointer (&self->scanline_buf, g_free);
++
++  g_usb_device_release_interface (fpi_device_get_usb_device (FP_DEVICE (dev)), 0, 0, &error);
++  fpi_image_device_close_complete (dev, error);
++  fp_dbg ("nb2033 deinitialized");
++}
++
++static void
++nb2033_dev_activate (FpImageDevice *dev)
++{
++  FpiDeviceNb2033 *self = FPI_DEVICE_NB2033 (dev);
++
++  self->deactivating = FALSE;
++
++  fpi_image_device_activate_complete (dev, NULL);
++  fp_dbg ("nb2033 activated");
++}
++
++static void
++nb2033_dev_deactivated (FpImageDevice *dev, GError *err)
++{
++  fpi_image_device_deactivate_complete (dev, err);
++  fp_dbg ("nb2033 deactivated");
++}
++
++static void
++nb2033_dev_deactivate (FpImageDevice *dev)
++{
++  FpiDeviceNb2033 *self = FPI_DEVICE_NB2033 (dev);
++
++  self->deactivating = TRUE;
++  if (self->ssm == NULL)
++    nb2033_dev_deactivated (dev, NULL);
++}
++
++/* --- Helpers for async bulk send + receive --- */
++
++/* Callback: after bulk OUT, read the response and ignore it, advance SSM */
++static void
++nb2033_read_ignore_data_cb (FpiUsbTransfer *transfer, FpDevice *dev,
++                            gpointer unused_data, GError *error)
++{
++  FpiDeviceNb2033 *self = FPI_DEVICE_NB2033 (dev);
++  FpiUsbTransfer *new_transfer;
++
++  if (error)
++    {
++      fpi_ssm_mark_failed (transfer->ssm, error);
++      return;
++    }
++  if (self->deactivating)
++    {
++      fpi_ssm_mark_completed (transfer->ssm);
++      return;
++    }
++
++  new_transfer = fpi_usb_transfer_new (dev);
++  new_transfer->short_is_error = TRUE;
++  new_transfer->ssm = transfer->ssm;
++
++  fpi_usb_transfer_fill_bulk (new_transfer, NB2033_EP_IN, NB2033_CMD_RECV_LEN);
++  fpi_usb_transfer_submit (new_transfer, NB2033_DEFAULT_TIMEOUT,
++                           fpi_device_get_cancellable (FP_DEVICE (dev)),
++                           fpi_ssm_usb_transfer_cb, NULL);
++}
++
++static void
++nb2033_write_ignore_read (FpiDeviceNb2033 *self, guint8 *buf, gsize len)
++{
++  FpiUsbTransfer *transfer;
++
++  transfer = fpi_usb_transfer_new (FP_DEVICE (self));
++  transfer->short_is_error = TRUE;
++  transfer->ssm = self->ssm;
++
++  fpi_usb_transfer_fill_bulk_full (transfer, NB2033_EP_OUT, buf, len, NULL);
++  fpi_usb_transfer_submit (transfer, NB2033_DEFAULT_TIMEOUT,
++                           fpi_device_get_cancellable (FP_DEVICE (self)),
++                           nb2033_read_ignore_data_cb, NULL);
++}
++
++/* --- Finger detection --- */
++
++static void
++nb2033_check_fingerprint_cb (FpiUsbTransfer *transfer, FpDevice *dev,
++                             gpointer unused_data, GError *error)
++{
++  FpiDeviceNb2033 *self = FPI_DEVICE_NB2033 (dev);
++  guint8 level;
++
++  if (error)
++    {
++      fpi_ssm_mark_failed (transfer->ssm, error);
++      return;
++    }
++  if (self->deactivating)
++    {
++      fpi_ssm_mark_completed (transfer->ssm);
++      return;
++    }
++
++  level = (transfer->actual_length > NB2033_FINGER_LEVEL_OFFSET) ?
++          transfer->buffer[NB2033_FINGER_LEVEL_OFFSET] : 0;
++
++  fp_dbg ("finger detect level=%d threshold=%d", level, NB2033_FINGER_THRESHOLD);
++
++  if (level > NB2033_FINGER_THRESHOLD)
++    fpi_ssm_next_state (transfer->ssm);
++  else
++    fpi_ssm_jump_to_state (transfer->ssm, M_WAIT_PRINT);
++}
++
++/* --- Capture --- */
++
++static void
++nb2033_read_capture_cb (FpiUsbTransfer *transfer, FpDevice *dev,
++                        gpointer unused_data, GError *error)
++{
++  FpiDeviceNb2033 *self = FPI_DEVICE_NB2033 (dev);
++  gsize offset;
++
++  if (error)
++    {
++      fpi_ssm_mark_failed (transfer->ssm, error);
++      return;
++    }
++  if (self->deactivating)
++    {
++      fpi_ssm_mark_completed (transfer->ssm);
++      return;
++    }
++
++  if (transfer->actual_length < NB2033_ROW_RECV_LEN)
++    {
++      fpi_ssm_mark_failed (transfer->ssm,
++                           fpi_device_error_new_msg (FP_DEVICE_ERROR_PROTO,
++                                                     "Short row read: %d",
++                                                     (int) transfer->actual_length));
++      return;
++    }
++
++  offset = self->partial_received * FRAME_WIDTH;
++  memcpy (self->scanline_buf + offset,
++          transfer->buffer + NB2033_ROW_HDR_LEN, FRAME_WIDTH);
++
++  self->partial_received++;
++  if (self->partial_received == FRAME_HEIGHT)
++    {
++      fpi_ssm_next_state (transfer->ssm);
++      return;
++    }
++
++  fpi_usb_transfer_submit (fpi_usb_transfer_ref (transfer), NB2033_CAPTURE_TIMEOUT,
++                           fpi_device_get_cancellable (FP_DEVICE (dev)),
++                           nb2033_read_capture_cb, NULL);
++}
++
++static gboolean
++submit_image (FpiSsm        *ssm,
++              FpImageDevice *dev)
++{
++  FpiDeviceNb2033 *self = FPI_DEVICE_NB2033 (dev);
++  FpImage *img;
++
++  img = fp_image_new (FRAME_WIDTH, FRAME_HEIGHT);
++  if (img == NULL)
++    return FALSE;
++
++  memcpy (img->data, self->scanline_buf, FRAME_WIDTH * FRAME_HEIGHT);
++  fpi_image_device_image_captured (dev, img);
++
++  return TRUE;
++}
++
++/* --- State machine --- */
++
++static void
++m_loop_complete (FpiSsm *ssm, FpDevice *_dev, GError *error)
++{
++  FpImageDevice *dev = FP_IMAGE_DEVICE (_dev);
++  FpiDeviceNb2033 *self = FPI_DEVICE_NB2033 (_dev);
++
++  self->ssm = NULL;
++
++  if (self->deactivating)
++    nb2033_dev_deactivated (dev, error);
++  else if (error != NULL)
++    fpi_image_device_session_error (dev, error);
++}
++
++static void
++m_loop_state (FpiSsm *ssm, FpDevice *_dev)
++{
++  FpImageDevice *dev = FP_IMAGE_DEVICE (_dev);
++  FpiDeviceNb2033 *self = FPI_DEVICE_NB2033 (_dev);
++
++  if (self->deactivating)
++    {
++      fp_dbg ("deactivating, marking completed");
++      fpi_ssm_mark_completed (ssm);
++      return;
++    }
++
++  switch (fpi_ssm_get_cur_state (ssm))
++    {
++    case M_INIT1_SEND:
++    case M_INIT2_SEND:
++      {
++        /* Send init/wake command (SDK sends this twice) */
++        FpiUsbTransfer *transfer;
++
++        transfer = fpi_usb_transfer_new (FP_DEVICE (self));
++        transfer->short_is_error = TRUE;
++        transfer->ssm = ssm;
++
++        fpi_usb_transfer_fill_bulk_full (transfer, NB2033_EP_OUT,
++                                         nb2033_cmd_init,
++                                         G_N_ELEMENTS (nb2033_cmd_init), NULL);
++        fpi_usb_transfer_submit (transfer, NB2033_DEFAULT_TIMEOUT,
++                                 fpi_device_get_cancellable (FP_DEVICE (self)),
++                                 fpi_ssm_usb_transfer_cb, NULL);
++      }
++      break;
++
++    case M_INIT1_READ:
++    case M_INIT2_READ:
++      {
++        /* Init response is 8 bytes */
++        FpiUsbTransfer *transfer;
++
++        transfer = fpi_usb_transfer_new (FP_DEVICE (self));
++        transfer->short_is_error = TRUE;
++        transfer->ssm = ssm;
++
++        fpi_usb_transfer_fill_bulk (transfer, NB2033_EP_IN, NB2033_INIT_RECV_LEN);
++        fpi_usb_transfer_submit (transfer, NB2033_DEFAULT_TIMEOUT,
++                                 fpi_device_get_cancellable (FP_DEVICE (self)),
++                                 fpi_ssm_usb_transfer_cb, NULL);
++      }
++      break;
++
++    case M_INIT_SETTLE:
++      /* Wait for init transients to decay before finger detection */
++      fpi_ssm_next_state_delayed (ssm, NB2033_SETTLE_DELAY);
++      break;
++
++    case M_WAIT_PRINT:
++      /* Wait before next finger detection poll */
++      fpi_ssm_next_state_delayed (ssm, NB2033_TRANSITION_DELAY);
++      break;
++
++    case M_CONFIG1:
++      /* First 0x0D(0x00) — Enhanced finger detect requires two configs */
++      nb2033_write_ignore_read (self, nb2033_cmd_config,
++                                G_N_ELEMENTS (nb2033_cmd_config));
++      break;
++
++    case M_CONFIG1_DONE:
++      fpi_ssm_next_state (ssm);
++      break;
++
++    case M_CONFIG2:
++      /* Second 0x0D(0x00) — completes Enhanced detect setup */
++      nb2033_write_ignore_read (self, nb2033_cmd_config,
++                                G_N_ELEMENTS (nb2033_cmd_config));
++      break;
++
++    case M_CONFIG2_DONE:
++      fpi_ssm_next_state (ssm);
++      break;
++
++    case M_DETECT_SEND:
++      {
++        /* Send 0x38 finger detect command */
++        FpiUsbTransfer *transfer;
++
++        transfer = fpi_usb_transfer_new (FP_DEVICE (self));
++        transfer->short_is_error = TRUE;
++        transfer->ssm = ssm;
++
++        fpi_usb_transfer_fill_bulk_full (transfer, NB2033_EP_OUT,
++                                         nb2033_cmd_check_finger,
++                                         G_N_ELEMENTS (nb2033_cmd_check_finger),
++                                         NULL);
++        fpi_usb_transfer_submit (transfer, NB2033_DEFAULT_TIMEOUT,
++                                 fpi_device_get_cancellable (FP_DEVICE (self)),
++                                 fpi_ssm_usb_transfer_cb, NULL);
++      }
++      break;
++
++    case M_DETECT_READ:
++      {
++        /* Read 0x38 response and check finger level */
++        FpiUsbTransfer *transfer;
++
++        transfer = fpi_usb_transfer_new (FP_DEVICE (self));
++        transfer->short_is_error = TRUE;
++        transfer->ssm = ssm;
++
++        fpi_usb_transfer_fill_bulk (transfer, NB2033_EP_IN, NB2033_CMD_RECV_LEN);
++        fpi_usb_transfer_submit (transfer, NB2033_DEFAULT_TIMEOUT,
++                                 fpi_device_get_cancellable (FP_DEVICE (self)),
++                                 nb2033_check_fingerprint_cb, NULL);
++      }
++      break;
++
++    case M_PRECAPTURE:
++      /* Finger detected — report and send precapture config */
++      fpi_image_device_report_finger_status (dev, TRUE);
++      nb2033_write_ignore_read (self, nb2033_cmd_config,
++                                G_N_ELEMENTS (nb2033_cmd_config));
++      break;
++
++    case M_PRECAPTURE_DONE:
++      fpi_ssm_next_state (ssm);
++      break;
++
++    case M_CAPTURE:
++      /* Send capture command */
++      self->partial_received = 0;
++      nb2033_write_ignore_read (self, nb2033_cmd_capture,
++                                G_N_ELEMENTS (nb2033_cmd_capture));
++      break;
++
++    case M_CAPTURE_DONE:
++      fpi_ssm_next_state (ssm);
++      break;
++
++    case M_CAPTURE_WAIT:
++      /* Wait for sensor to prepare first row */
++      fpi_ssm_next_state_delayed (ssm, NB2033_ROW_READY_DELAY);
++      break;
++
++    case M_READ_DATA:
++      {
++        /* Read 180 rows of image data */
++        FpiUsbTransfer *transfer;
++
++        transfer = fpi_usb_transfer_new (FP_DEVICE (self));
++        transfer->ssm = ssm;
++
++        fpi_usb_transfer_fill_bulk (transfer, NB2033_EP_IN, NB2033_ROW_RECV_LEN);
++        fpi_usb_transfer_submit (transfer, NB2033_CAPTURE_TIMEOUT,
++                                 fpi_device_get_cancellable (FP_DEVICE (self)),
++                                 nb2033_read_capture_cb, NULL);
++      }
++      break;
++
++    case M_SUBMIT_PRINT:
++      if (submit_image (ssm, dev))
++        {
++          fpi_ssm_mark_completed (ssm);
++          fpi_image_device_report_finger_status (dev, FALSE);
++        }
++      else
++        {
++          fpi_ssm_jump_to_state (ssm, M_WAIT_PRINT);
++        }
++      break;
++
++    default:
++      g_assert_not_reached ();
++    }
++}
++
++static void
++nb2033_dev_change_state (FpImageDevice *dev, FpiImageDeviceState state)
++{
++  FpiDeviceNb2033 *self = FPI_DEVICE_NB2033 (dev);
++  FpiSsm *ssm_loop;
++
++  if (state == FPI_IMAGE_DEVICE_STATE_AWAIT_FINGER_ON)
++    {
++      ssm_loop = fpi_ssm_new (FP_DEVICE (dev), m_loop_state, M_LOOP_NUM_STATES);
++      self->ssm = ssm_loop;
++      fpi_ssm_start (ssm_loop, m_loop_complete);
++    }
++}
++
++static const FpIdEntry id_table[] = {
++  { .vid = 0x298d,  .pid = 0x2033, },
++  { .vid = 0,  .pid = 0,  .driver_data = 0 },
++};
++
++static void
++fpi_device_nb2033_init (FpiDeviceNb2033 *self)
++{
++}
++
++static void
++fpi_device_nb2033_class_init (FpiDeviceNb2033Class *klass)
++{
++  FpDeviceClass *dev_class = FP_DEVICE_CLASS (klass);
++  FpImageDeviceClass *img_class = FP_IMAGE_DEVICE_CLASS (klass);
++
++  dev_class->id = FP_COMPONENT;
++  dev_class->full_name = "NextBiometrics NB-2033-U";
++  dev_class->type = FP_DEVICE_TYPE_USB;
++  dev_class->id_table = id_table;
++  dev_class->scan_type = FP_SCAN_TYPE_PRESS;
++
++  img_class->img_height = FRAME_HEIGHT;
++  img_class->img_width = FRAME_WIDTH;
++
++  img_class->bz3_threshold = 40;
++
++  img_class->img_open = nb2033_dev_init;
++  img_class->img_close = nb2033_dev_deinit;
++  img_class->activate = nb2033_dev_activate;
++  img_class->deactivate = nb2033_dev_deactivate;
++  img_class->change_state = nb2033_dev_change_state;
++}
+diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/libfprint/fprint-list-udev-hwdb.c libfprint/libfprint/fprint-list-udev-hwdb.c
+--- libfprint-v1.94.100/libfprint/fprint-list-udev-hwdb.c	2026-07-26 07:36:25.000000000 +0900
++++ libfprint/libfprint/fprint-list-udev-hwdb.c	2026-08-31 15:03:23.209277478 +0900
+@@ -195,7 +195,6 @@
+   { .vid = 0x2808, .pid = 0xa573 },
+   { .vid = 0x2808, .pid = 0xa658 },
+   { .vid = 0x2808, .pid = 0xc652 },
+-  { .vid = 0x298d, .pid = 0x2033 },
+   { .vid = 0x2df0, .pid = 0x0003 },
+   { .vid = 0x3274, .pid = 0x9008 },
+   { .vid = 0x3274, .pid = 0xb012 },
+diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/libfprint/meson.build libfprint/libfprint/meson.build
+--- libfprint-v1.94.100/libfprint/meson.build	2026-07-26 07:36:25.000000000 +0900
++++ libfprint/libfprint/meson.build	2026-08-31 15:03:23.209277478 +0900
+@@ -123,6 +123,7 @@
+     'elanmoc' : files('drivers/elanmoc/elanmoc.c'),
+     'elanspi' : files('drivers/elanspi.c'),
+     'nb1010' : files('drivers/nb1010.c'),
++    'nb2033' : files('drivers/nb2033.c'),
+     'virtual_image' : files('drivers/virtual-image.c'),
+     'virtual_device' : files('drivers/virtual-device.c'),
+     'virtual_device_storage' : files('drivers/virtual-device-storage.c'),
+diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/meson.build libfprint/meson.build
+--- libfprint-v1.94.100/meson.build	2026-07-26 07:36:25.000000000 +0900
++++ libfprint/meson.build	2026-08-31 15:03:23.209277478 +0900
+@@ -142,6 +142,7 @@
+     'upekts': {},
+     'goodixmoc': {},
+     'nb1010': {},
++    'nb2033': {},
+     'fpcmoc': {},
+     'realtek': {},
+     'focaltech_moc': {},
+バイナリーファイル libfprint-v1.94.100/tests/nb2033/capture.pcapng とlibfprint/tests/nb2033/capture.pcapng は異なります
+バイナリーファイル libfprint-v1.94.100/tests/nb2033/capture.png とlibfprint/tests/nb2033/capture.png は異なります
+diff -uNr -x build -x '*.o' -x .git -uNr libfprint-v1.94.100/tests/nb2033/device libfprint/tests/nb2033/device
+--- libfprint-v1.94.100/tests/nb2033/device	1970-01-01 09:00:00.000000000 +0900
++++ libfprint/tests/nb2033/device	2026-08-31 15:03:23.219277302 +0900
+@@ -0,0 +1,378 @@
++P: /devices/pci0000:00/0000:00:14.0/usb1/1-6/1-6.1
++N: bus/usb/001/006=12010002000000408D29332001000102030109022000010104A0FA0904000002FFFFFF050705810240000007050202400000
++E: BUSNUM=001
++E: CURRENT_TAGS=:seat:
++E: DEVNAME=/dev/bus/usb/001/006
++E: DEVNUM=006
++E: DEVTYPE=usb_device
++E: DRIVER=usb
++E: ID_AUTOSUSPEND=1
++E: ID_BUS=usb
++E: ID_FOR_SEAT=usb-pci-0000_00_14_0-usb-0_6_1
++E: ID_MODEL=NB-2033-U
++E: ID_MODEL_ENC=NB-2033-U
++E: ID_MODEL_ID=2033
++E: ID_PATH=pci-0000:00:14.0-usb-0:6.1
++E: ID_PATH_TAG=pci-0000_00_14_0-usb-0_6_1
++E: ID_PATH_WITH_USB_REVISION=pci-0000:00:14.0-usbv2-0:6.1
++E: ID_PERSIST=0
++E: ID_REVISION=0001
++E: ID_SERIAL=NEXT_Biometrics_NB-2033-U_205D333C4353
++E: ID_SERIAL_SHORT=205D333C4353
++E: ID_USB_INTERFACES=:ffffff:
++E: ID_USB_MODEL=NB-2033-U
++E: ID_USB_MODEL_ENC=NB-2033-U
++E: ID_USB_MODEL_ID=2033
++E: ID_USB_REVISION=0001
++E: ID_USB_SERIAL=NEXT_Biometrics_NB-2033-U_205D333C4353
++E: ID_USB_SERIAL_SHORT=205D333C4353
++E: ID_USB_VENDOR=NEXT_Biometrics
++E: ID_USB_VENDOR_ENC=NEXT\x20Biometrics
++E: ID_USB_VENDOR_ID=298d
++E: ID_VENDOR=NEXT_Biometrics
++E: ID_VENDOR_ENC=NEXT\x20Biometrics
++E: ID_VENDOR_FROM_DATABASE=Next Biometrics
++E: ID_VENDOR_ID=298d
++E: MAJOR=189
++E: MINOR=5
++E: PRODUCT=298d/2033/1
++E: SUBSYSTEM=usb
++E: TAGS=:seat:
++E: TYPE=0/0/0
++A: authorized=1\n
++A: avoid_reset_quirk=0\n
++A: bConfigurationValue=1\n
++A: bDeviceClass=00\n
++A: bDeviceProtocol=00\n
++A: bDeviceSubClass=00\n
++A: bMaxPacketSize0=64\n
++A: bMaxPower=500mA\n
++A: bNumConfigurations=1\n
++A: bNumInterfaces= 1\n
++A: bcdDevice=0001\n
++A: bmAttributes=a0\n
++A: busnum=1\n
++A: configuration=Default Config\n
++H: descriptors=12010002000000408D29332001000102030109022000010104A0FA0904000002FFFFFF050705810240000007050202400000
++A: dev=189:5\n
++A: devnum=6\n
++A: devpath=6.1\n
++L: driver=../../../../../../bus/usb/drivers/usb
++L: firmware_node=../../../../../LNXSYSTM:00/LNXSYBUS:00/PNP0A08:00/device:1c/device:1d/device:2b/device:2c
++A: idProduct=2033\n
++A: idVendor=298d\n
++A: ltm_capable=no\n
++A: manufacturer=NEXT Biometrics\n
++A: maxchild=0\n
++A: physical_location/dock=no\n
++A: physical_location/horizontal_position=left\n
++A: physical_location/lid=no\n
++A: physical_location/panel=unknown\n
++A: physical_location/vertical_position=upper\n
++L: port=../1-6:1.0/1-6-port1
++A: power/active_duration=214490\n
++A: power/async=enabled\n
++A: power/autosuspend=2\n
++A: power/autosuspend_delay_ms=2000\n
++A: power/connected_duration=767786\n
++A: power/control=auto\n
++A: power/level=auto\n
++A: power/persist=0\n
++A: power/runtime_active_kids=0\n
++A: power/runtime_active_time=214663\n
++A: power/runtime_enabled=enabled\n
++A: power/runtime_status=active\n
++A: power/runtime_suspended_time=552975\n
++A: power/runtime_usage=0\n
++A: power/wakeup=disabled\n
++A: power/wakeup_abort_count=\n
++A: power/wakeup_active=\n
++A: power/wakeup_active_count=\n
++A: power/wakeup_count=\n
++A: power/wakeup_expire_count=\n
++A: power/wakeup_last_time_ms=\n
++A: power/wakeup_max_time_ms=\n
++A: power/wakeup_total_time_ms=\n
++A: product=NB-2033-U\n
++A: quirks=0x0\n
++A: removable=fixed\n
++A: rx_lanes=1\n
++A: serial=205D333C4353\n
++A: speed=12\n
++A: tx_lanes=1\n
++A: urbnum=17164\n
++A: version= 2.00\n
++
++P: /devices/pci0000:00/0000:00:14.0/usb1/1-6
++N: bus/usb/001/002=1201000209000140E305080632880001000109021900010100E0320904000001090000000705810301000C
++E: BUSNUM=001
++E: CURRENT_TAGS=:seat:
++E: DEVNAME=/dev/bus/usb/001/002
++E: DEVNUM=002
++E: DEVTYPE=usb_device
++E: DRIVER=usb
++E: ID_BUS=usb
++E: ID_FOR_SEAT=usb-pci-0000_00_14_0-usb-0_6
++E: ID_MODEL=USB2.0_Hub
++E: ID_MODEL_ENC=USB2.0\x20Hub
++E: ID_MODEL_FROM_DATABASE=Hub
++E: ID_MODEL_ID=0608
++E: ID_PATH=pci-0000:00:14.0-usb-0:6
++E: ID_PATH_TAG=pci-0000_00_14_0-usb-0_6
++E: ID_PATH_WITH_USB_REVISION=pci-0000:00:14.0-usbv2-0:6
++E: ID_REVISION=8832
++E: ID_SERIAL=05e3_USB2.0_Hub
++E: ID_USB_INTERFACES=:090000:
++E: ID_USB_MODEL=USB2.0_Hub
++E: ID_USB_MODEL_ENC=USB2.0\x20Hub
++E: ID_USB_MODEL_ID=0608
++E: ID_USB_REVISION=8832
++E: ID_USB_SERIAL=05e3_USB2.0_Hub
++E: ID_USB_VENDOR=05e3
++E: ID_USB_VENDOR_ENC=05e3
++E: ID_USB_VENDOR_ID=05e3
++E: ID_VENDOR=05e3
++E: ID_VENDOR_ENC=05e3
++E: ID_VENDOR_FROM_DATABASE=Genesys Logic, Inc.
++E: ID_VENDOR_ID=05e3
++E: MAJOR=189
++E: MINOR=1
++E: PRODUCT=5e3/608/8832
++E: SUBSYSTEM=usb
++E: TAGS=:seat:
++E: TYPE=9/0/1
++A: authorized=1\n
++A: avoid_reset_quirk=0\n
++A: bConfigurationValue=1\n
++A: bDeviceClass=09\n
++A: bDeviceProtocol=01\n
++A: bDeviceSubClass=00\n
++A: bMaxPacketSize0=64\n
++A: bMaxPower=100mA\n
++A: bNumConfigurations=1\n
++A: bNumInterfaces= 1\n
++A: bcdDevice=8832\n
++A: bmAttributes=e0\n
++A: busnum=1\n
++A: configuration=
++H: descriptors=1201000209000140E305080632880001000109021900010100E0320904000001090000000705810301000C
++A: dev=189:1\n
++A: devnum=2\n
++A: devpath=6\n
++L: driver=../../../../../bus/usb/drivers/usb
++L: firmware_node=../../../../LNXSYSTM:00/LNXSYBUS:00/PNP0A08:00/device:1c/device:1d/device:2b
++A: idProduct=0608\n
++A: idVendor=05e3\n
++A: ltm_capable=no\n
++A: maxchild=4\n
++A: physical_location/dock=no\n
++A: physical_location/horizontal_position=left\n
++A: physical_location/lid=no\n
++A: physical_location/panel=unknown\n
++A: physical_location/vertical_position=upper\n
++L: port=../1-0:1.0/usb1-port6
++A: power/active_duration=382588\n
++A: power/async=enabled\n
++A: power/autosuspend=0\n
++A: power/autosuspend_delay_ms=0\n
++A: power/connected_duration=1148422\n
++A: power/control=auto\n
++A: power/level=auto\n
++A: power/runtime_active_kids=1\n
++A: power/runtime_active_time=383001\n
++A: power/runtime_enabled=enabled\n
++A: power/runtime_status=active\n
++A: power/runtime_suspended_time=765185\n
++A: power/runtime_usage=0\n
++A: power/wakeup=disabled\n
++A: power/wakeup_abort_count=\n
++A: power/wakeup_active=\n
++A: power/wakeup_active_count=\n
++A: power/wakeup_count=\n
++A: power/wakeup_expire_count=\n
++A: power/wakeup_last_time_ms=\n
++A: power/wakeup_max_time_ms=\n
++A: power/wakeup_total_time_ms=\n
++A: product=USB2.0 Hub\n
++A: quirks=0x0\n
++A: removable=fixed\n
++A: rx_lanes=1\n
++A: speed=480\n
++A: tx_lanes=1\n
++A: urbnum=244\n
++A: version= 2.00\n
++
++P: /devices/pci0000:00/0000:00:14.0/usb1
++N: bus/usb/001/001=12010002090001406B1D020017060302010109021900010100E0000904000001090000000705810304000C
++E: BUSNUM=001
++E: CURRENT_TAGS=:seat:
++E: DEVNAME=/dev/bus/usb/001/001
++E: DEVNUM=001
++E: DEVTYPE=usb_device
++E: DRIVER=usb
++E: ID_AUTOSUSPEND=1
++E: ID_BUS=usb
++E: ID_FOR_SEAT=usb-pci-0000_00_14_0
++E: ID_MODEL=xHCI_Host_Controller
++E: ID_MODEL_ENC=xHCI\x20Host\x20Controller
++E: ID_MODEL_FROM_DATABASE=2.0 root hub
++E: ID_MODEL_ID=0002
++E: ID_PATH=pci-0000:00:14.0
++E: ID_PATH_TAG=pci-0000_00_14_0
++E: ID_REVISION=0617
++E: ID_SERIAL=Linux_6.17.0-19-generic_xhci-hcd_xHCI_Host_Controller_0000:00:14.0
++E: ID_SERIAL_SHORT=0000:00:14.0
++E: ID_USB_INTERFACES=:090000:
++E: ID_USB_MODEL=xHCI_Host_Controller
++E: ID_USB_MODEL_ENC=xHCI\x20Host\x20Controller
++E: ID_USB_MODEL_ID=0002
++E: ID_USB_REVISION=0617
++E: ID_USB_SERIAL=Linux_6.17.0-19-generic_xhci-hcd_xHCI_Host_Controller_0000:00:14.0
++E: ID_USB_SERIAL_SHORT=0000:00:14.0
++E: ID_USB_VENDOR=Linux_6.17.0-19-generic_xhci-hcd
++E: ID_USB_VENDOR_ENC=Linux\x206.17.0-19-generic\x20xhci-hcd
++E: ID_USB_VENDOR_ID=1d6b
++E: ID_VENDOR=Linux_6.17.0-19-generic_xhci-hcd
++E: ID_VENDOR_ENC=Linux\x206.17.0-19-generic\x20xhci-hcd
++E: ID_VENDOR_FROM_DATABASE=Linux Foundation
++E: ID_VENDOR_ID=1d6b
++E: MAJOR=189
++E: MINOR=0
++E: PRODUCT=1d6b/2/617
++E: SUBSYSTEM=usb
++E: TAGS=:seat:
++E: TYPE=9/0/1
++A: authorized=1\n
++A: authorized_default=1\n
++A: avoid_reset_quirk=0\n
++A: bConfigurationValue=1\n
++A: bDeviceClass=09\n
++A: bDeviceProtocol=01\n
++A: bDeviceSubClass=00\n
++A: bMaxPacketSize0=64\n
++A: bMaxPower=0mA\n
++A: bNumConfigurations=1\n
++A: bNumInterfaces= 1\n
++A: bcdDevice=0617\n
++A: bmAttributes=e0\n
++A: busnum=1\n
++A: configuration=
++H: descriptors=12010002090001406B1D020017060302010109021900010100E0000904000001090000000705810304000C
++A: dev=189:0\n
++A: devnum=1\n
++A: devpath=0\n
++L: driver=../../../../bus/usb/drivers/usb
++L: firmware_node=../../../LNXSYSTM:00/LNXSYBUS:00/PNP0A08:00/device:1c/device:1d
++A: idProduct=0002\n
++A: idVendor=1d6b\n
++A: interface_authorized_default=1\n
++A: ltm_capable=no\n
++A: manufacturer=Linux 6.17.0-19-generic xhci-hcd\n
++A: maxchild=12\n
++A: power/active_duration=396820\n
++A: power/async=enabled\n
++A: power/autosuspend=0\n
++A: power/autosuspend_delay_ms=0\n
++A: power/connected_duration=1148561\n
++A: power/control=auto\n
++A: power/level=auto\n
++A: power/runtime_active_kids=1\n
++A: power/runtime_active_time=396815\n
++A: power/runtime_enabled=enabled\n
++A: power/runtime_status=active\n
++A: power/runtime_suspended_time=751744\n
++A: power/runtime_usage=0\n
++A: power/wakeup=disabled\n
++A: power/wakeup_abort_count=\n
++A: power/wakeup_active=\n
++A: power/wakeup_active_count=\n
++A: power/wakeup_count=\n
++A: power/wakeup_expire_count=\n
++A: power/wakeup_last_time_ms=\n
++A: power/wakeup_max_time_ms=\n
++A: power/wakeup_total_time_ms=\n
++A: product=xHCI Host Controller\n
++A: quirks=0x0\n
++A: removable=unknown\n
++A: rx_lanes=1\n
++A: serial=0000:00:14.0\n
++A: speed=480\n
++A: tx_lanes=1\n
++A: urbnum=382\n
++A: version= 2.00\n
++
++P: /devices/pci0000:00/0000:00:14.0
++E: DRIVER=xhci_hcd
++E: ID_AUTOSUSPEND=1
++E: ID_MODEL_FROM_DATABASE=Comet Lake PCH-LP USB 3.1 xHCI Host Controller
++E: ID_PATH=pci-0000:00:14.0
++E: ID_PATH_TAG=pci-0000_00_14_0
++E: ID_PCI_CLASS_FROM_DATABASE=Serial bus controller
++E: ID_PCI_INTERFACE_FROM_DATABASE=XHCI
++E: ID_PCI_SUBCLASS_FROM_DATABASE=USB controller
++E: ID_VENDOR_FROM_DATABASE=Intel Corporation
++E: MODALIAS=pci:v00008086d000002EDsv00001E26sd0000003Fbc0Csc03i30
++E: PCI_CLASS=C0330
++E: PCI_ID=8086:02ED
++E: PCI_SLOT_NAME=0000:00:14.0
++E: PCI_SUBSYS_ID=1E26:003F
++E: SUBSYSTEM=pci
++A: ari_enabled=0\n
++A: broken_parity_status=0\n
++A: class=0x0c0330\n
++H: config=8680ED02060490020030030C00008000040012A2000000000000000000000000000000000000000000000000261E3F00000000007000000000000000FF010000FD0134808FC6FF8300000000000000007F6DDC0F000000000000000000000000316000000000000000000000000000000180C2C10800000000000000000000000590B7001804E0FE0000000000000000090014F01000400100000000C10A080000080E00001800008F40020000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000B50F000112000000
++A: consistent_dma_mask_bits=64\n
++A: d3cold_allowed=1\n
++A: dbc=disabled\n
++A: dbc_bInterfaceProtocol=01\n
++A: dbc_bcdDevice=0010\n
++A: dbc_idProduct=0010\n
++A: dbc_idVendor=1d6b\n
++A: dbc_poll_interval_ms=64\n
++A: device=0x02ed\n
++A: dma_mask_bits=64\n
++L: driver=../../../bus/pci/drivers/xhci_hcd
++A: driver_override=(null)\n
++A: enable=1\n
++L: firmware_node=../../LNXSYSTM:00/LNXSYBUS:00/PNP0A08:00/device:1c
++L: iommu=../../virtual/iommu/dmar1
++L: iommu_group=../../../kernel/iommu_groups/2
++A: irq=126\n
++A: local_cpulist=0-7\n
++A: local_cpus=ff\n
++A: modalias=pci:v00008086d000002EDsv00001E26sd0000003Fbc0Csc03i30\n
++A: msi_bus=1\n
++A: msi_irqs/126=msi\n
++A: msi_irqs/127=msi\n
++A: msi_irqs/128=msi\n
++A: msi_irqs/129=msi\n
++A: msi_irqs/130=msi\n
++A: msi_irqs/131=msi\n
++A: msi_irqs/132=msi\n
++A: msi_irqs/133=msi\n
++A: numa_node=-1\n
++A: pools=poolinfo - 0.1\nbuffer-2048         0    0 2048  0\nbuffer-512          0    0  512  0\nbuffer-128          0    0  128  0\nbuffer-32           0    0   32  0\nxHCI 256 port bw ctx arrays    0    0  256  0\nxHCI 1KB stream ctx arrays    0    0 1024  0\nxHCI 256 byte stream ctx arrays    0    0  256  0\nxHCI input/output contexts    8    9 2112  9\nxHCI ring segments   29   29 4096 29\nbuffer-2048         0    0 2048  0\nbuffer-512          0    0  512  0\nbuffer-128          0    0  128  0\nbuffer-32           0    0   32  0\n
++A: power/async=enabled\n
++A: power/control=auto\n
++A: power/runtime_active_kids=1\n
++A: power/runtime_active_time=397455\n
++A: power/runtime_enabled=enabled\n
++A: power/runtime_status=active\n
++A: power/runtime_suspended_time=751497\n
++A: power/runtime_usage=0\n
++A: power/wakeup=enabled\n
++A: power/wakeup_abort_count=0\n
++A: power/wakeup_active=0\n
++A: power/wakeup_active_count=0\n
++A: power/wakeup_count=0\n
++A: power/wakeup_expire_count=0\n
++A: power/wakeup_last_time_ms=0\n
++A: power/wakeup_max_time_ms=0\n
++A: power/wakeup_total_time_ms=0\n
++A: power_state=D0\n
++A: resource=0x00000000a2120000 0x00000000a212ffff 0x0000000000140204\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n0x0000000000000000 0x0000000000000000 0x0000000000000000\n
++A: revision=0x00\n
++A: subsystem_device=0x003f\n
++A: subsystem_vendor=0x1e26\n
++A: vendor=0x8086\n
++

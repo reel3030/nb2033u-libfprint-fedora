@@ -1,1 +1,5 @@
-libfprint
+# Build directory
+/rpmbuild/
+
+# source RPM
+*.src.rpm
