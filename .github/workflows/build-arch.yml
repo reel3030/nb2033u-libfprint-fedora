@@ -17,20 +17,15 @@ jobs:
       - name: Update system & Install build dependencies
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git meson ninja glib2 libgudev libgusb pixman nss polkit systemd gobject-introspection
+          # gtk-doc を含むビルド依存パッケージを一括インストール
+          pacman -S --noconfirm base-devel git meson ninja glib2 libgudev libgusb pixman nss polkit systemd gobject-introspection gtk-doc
 
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Debug - List files in workspace
-        run: |
-          echo "=== Current Directory ==="
-          pwd
-          echo "=== Directory Contents ==="
-          ls -la
 
       - name: Build Arch Package via makepkg
         run: |
           useradd -m builduser
           chown -R builduser:builduser .
-          su builduser -c "makepkg -sf --noconfirm"
+          # -s (--syncdeps) は使わず、事前導入済みとしてビルドのみ実行
+          su builduser -c "makepkg -f --noconfirm"
