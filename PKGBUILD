@@ -1,7 +1,7 @@
 # Maintainer: Reel <reel@example.com>
 pkgname=libfprint-nb2033u
 _pkgname=libfprint
-pkgver=1.94.8
+pkgver=1.94.100
 pkgrel=1
 pkgdesc="Library for fingerprint reader devices with NB2033U patch"
 arch=('x86_64')
@@ -27,6 +27,7 @@ makedepends=(
 provides=('libfprint' 'libfprint-2.so')
 conflicts=('libfprint')
 
+# 1.94.100 タグの libfprint を取得
 source=(
   "git+https://gitlab.freedesktop.org/libfprint/libfprint.git#tag=v${pkgver}"
   "nb2033u.patch"
@@ -38,6 +39,7 @@ sha256sums=(
 
 prepare() {
   cd "$_pkgname"
+  # -p1 または -p0 でパッチを適用
   patch -Np1 -i "$srcdir/nb2033u.patch"
 }
 
