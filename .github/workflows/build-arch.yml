@@ -17,8 +17,8 @@ jobs:
       - name: Update system & Install build dependencies
         run: |
           pacman -Syu --noconfirm
-          # gtk-doc を含むビルド依存パッケージを一括インストール
-          pacman -S --noconfirm base-devel git meson ninja glib2 libgudev libgusb pixman nss polkit systemd gobject-introspection gtk-doc
+          # glib2-devel を追加
+          pacman -S --noconfirm base-devel git meson ninja glib2 glib2-devel libgudev libgusb pixman nss polkit systemd gobject-introspection gtk-doc
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,5 +27,4 @@ jobs:
         run: |
           useradd -m builduser
           chown -R builduser:builduser .
-          # -s (--syncdeps) は使わず、事前導入済みとしてビルドのみ実行
           su builduser -c "makepkg -f --noconfirm"
