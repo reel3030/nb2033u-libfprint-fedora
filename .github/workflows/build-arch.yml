@@ -46,7 +46,15 @@ jobs:
           pacman -S --noconfirm \
             libgudev \
             libgusb \
-            pixman
+            pixman \
+            glib2-devel \
+            gobject-introspection \
+            gtk-doc \
+            meson \
+            python-cairo \
+            python-gobject \
+            cairo \
+            umockdev
 
       - name: Build package
         run: |
