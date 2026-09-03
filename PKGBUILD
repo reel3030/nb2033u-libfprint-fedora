@@ -32,14 +32,17 @@ source=(
   "git+https://gitlab.freedesktop.org/libfprint/libfprint.git#tag=v${pkgver}"
   "nb2033u.patch"
 )
+source=(
+  "git+https://gitlab.freedesktop.org/libfprint/libfprint.git?signed#tag=v$pkgver"
+  "nb2033u.patch"
+)
 sha256sums=(
   'SKIP'
   'SKIP'
 )
 
 prepare() {
-  cd "$_pkgname"
-  # -p1 または -p0 でパッチを適用
+  cd $pkgname
   patch -Np1 -i "$srcdir/nb2033u.patch"
 }
 
