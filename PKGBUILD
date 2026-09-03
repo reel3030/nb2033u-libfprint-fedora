@@ -41,6 +41,10 @@ sha256sums=(
   'SKIP'
 )
 
+validpgpkeys=(
+  40F65066AD7C16DB
+)
+
 prepare() {
   cd $pkgname
   patch -Np1 -i "$srcdir/nb2033u.patch"
