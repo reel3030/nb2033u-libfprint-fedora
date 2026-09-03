@@ -31,6 +31,11 @@ jobs:
         run: |
           cat arch-libfprint/PKGBUILD
 
+      - name: Copy NB2033 patch
+        run: |
+          cp nb2033.patch arch-libfprint/
+          ls -l arch-libfprint/nb2033.patch
+
       - name: Check environment
         run: |
           uname -a
