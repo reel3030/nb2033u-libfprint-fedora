@@ -41,3 +41,12 @@ jobs:
           uname -a
           pacman --version
           makepkg --version
+
+      - name: Build package
+        run: |
+          cd arch-libfprint
+          makepkg -sf --noconfirm
+          
+      - name: Show package
+        run: |
+          ls -lh arch-libfprint/*.pkg.tar.zst
