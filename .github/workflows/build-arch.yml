@@ -41,6 +41,12 @@ jobs:
           uname -a
           pacman --version
           makepkg --version
+      - name: Install build dependencies
+        run: |
+          pacman -S --noconfirm \
+            libgudev \
+            libgusb \
+            pixman
 
       - name: Build package
         run: |
