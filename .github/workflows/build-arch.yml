@@ -23,6 +23,10 @@ jobs:
           pacman -S --noconfirm \
             base-devel \
             git
+      - name: Get Arch libfprint PKGBUILD
+        run: |
+          git clone https://gitlab.archlinux.org/archlinux/packaging/packages/libfprint.git arch-libfprint
+          ls -la arch-libfprint
 
       - name: Check environment
         run: |
