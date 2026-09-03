@@ -27,6 +27,9 @@ jobs:
         run: |
           git clone https://gitlab.archlinux.org/archlinux/packaging/packages/libfprint.git arch-libfprint
           ls -la arch-libfprint
+      - name: Show PKGBUILD
+        run: |
+          cat arch-libfprint/PKGBUILD
 
       - name: Check environment
         run: |
