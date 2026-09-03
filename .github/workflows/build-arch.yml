@@ -33,8 +33,8 @@ jobs:
 
       - name: Copy NB2033 patch
         run: |
-          cp nb2033.patch arch-libfprint/
-          ls -l arch-libfprint/nb2033.patch
+          cp nb2033u.patch arch-libfprint/
+          ls -l arch-libfprint/nb2033u.patch
 
       - name: Check environment
         run: |
