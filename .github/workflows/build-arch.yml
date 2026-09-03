@@ -44,8 +44,9 @@ jobs:
 
       - name: Build package
         run: |
-          cd arch-libfprint
-          makepkg -sf --noconfirm
+          useradd -m builder
+          chown -R builder:builder arch-libfprint
+          su - builder -c "cd $GITHUB_WORKSPACE/arch-libfprint && makepkg -sf --noconfirm"
           
       - name: Show package
         run: |
