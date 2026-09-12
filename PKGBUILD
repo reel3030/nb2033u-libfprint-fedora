@@ -32,10 +32,7 @@ source=(
   "git+https://gitlab.freedesktop.org/libfprint/libfprint.git#tag=v${pkgver}"
   "nb2033u.patch"
 )
-source=(
-  "git+https://gitlab.freedesktop.org/libfprint/libfprint.git?signed#tag=v$pkgver"
-  "nb2033u.patch"
-)
+source=("git+https://gitlab.freedesktop.org/Kernel-Error/libfprint.git#branch=nb2033-support")
 sha256sums=(
   'SKIP'
   'SKIP'
