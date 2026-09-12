@@ -29,22 +29,16 @@ conflicts=('libfprint')
 
 # 1.94.100 タグの libfprint を取得
 source=(
-  "git+https://gitlab.freedesktop.org/libfprint/libfprint.git#tag=v${pkgver}"
-  "nb2033u.patch"
+  "git+https://gitlab.freedesktop.org/Kernel-Error/libfprint.git#branch=nb2033-support"
 )
-source=("git+https://gitlab.freedesktop.org/Kernel-Error/libfprint.git#branch=nb2033-support")
-sha256sums=(
-  'SKIP'
-  'SKIP'
-)
+sha256sums=('SKIP')
 
 validpgpkeys=(
   40F65066AD7C16DB
 )
 
 prepare() {
-  cd $pkgname
-  patch -Np1 -i "$srcdir/nb2033u.patch"
+  cd "$_pkgname"
 }
 
 build() {
