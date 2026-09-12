@@ -59,7 +59,7 @@ jobs:
         run: |
           pacman -S --noconfirm gnupg
           gpg --keyserver keyserver.ubuntu.com --recv-keys 40F65066AD7C16DB
-
+          
       - name: Build package
         run: |
           useradd -m builder
@@ -67,7 +67,7 @@ jobs:
 
           su - builder -c '
             gpg --keyserver keyserver.ubuntu.com --recv-keys 40F65066AD7C16DB
-            cd "$GITHUB_WORKSPACE/arch-libfprint"
+            cd /__w/nb2033u-libfprint-fedora/nb2033u-libfprint-fedora/arch-libfprint
             makepkg -sf --noconfirm
           '
           
