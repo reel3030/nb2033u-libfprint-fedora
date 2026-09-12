@@ -55,12 +55,21 @@ jobs:
             python-gobject \
             cairo \
             umockdev
+      - name: Import libfprint signing key
+        run: |
+          pacman -S --noconfirm gnupg
+          gpg --keyserver keyserver.ubuntu.com --recv-keys 40F65066AD7C16DB
 
       - name: Build package
         run: |
           useradd -m builder
           chown -R builder:builder arch-libfprint
-          su - builder -c "cd $GITHUB_WORKSPACE/arch-libfprint && makepkg -sf --noconfirm"
+
+          su - builder -c '
+            gpg --keyserver keyserver.ubuntu.com --recv-keys 40F65066AD7C16DB
+            cd "$GITHUB_WORKSPACE/arch-libfprint"
+            makepkg -sf --noconfirm
+          '
           
       - name: Show package
         run: |
