@@ -70,6 +70,11 @@ jobs:
             cd /__w/nb2033u-libfprint-fedora/nb2033u-libfprint-fedora/arch-libfprint
             makepkg -sf --noconfirm
           '
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: libfprint-nb2033u
+          path: arch-libfprint/*.pkg.tar.zst
           
       - name: Show package
         run: |
